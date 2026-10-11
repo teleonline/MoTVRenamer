@@ -1,0 +1,40 @@
+MoTV Renamer - Free License for Personal, Non-Commercial Use
+
+Copyright (c) 2026 teleonline and MoTV Renamer contributors
+
+1. PERMISSION. You may use, copy, study and modify this software, free of
+   charge, for your own personal, non-commercial purposes, and share unmodified
+   or modified copies with others free of charge, as long as this license and
+   the copyright notice are kept with every copy.
+
+2. NO COMMERCIAL USE. You may NOT sell, rent, sublicense or charge for this
+   software or any work derived from it, include it in a paid product or
+   service, or use it in any commercial activity or for commercial gain.
+   Use by a company, or for work done for a client, is commercial use.
+
+3. LEGAL USE ONLY. This software only renames files that already exist on your
+   computer, using metadata from public online databases. It does not download,
+   stream, distribute or give access to copyrighted content, and it does not
+   bypass any protection. You are solely responsible for the files you rename,
+   for complying with the laws of your country and with the terms of use of
+   the data services it queries (TMDb, OMDb, TheTVDB, IMDb).
+
+4. NO AFFILIATION. This product uses the TMDb, OMDb and TheTVDB APIs and
+   queries IMDb, but is not endorsed or certified by any of them. All data and
+   trademarks belong to their respective owners.
+
+5. NO WARRANTY. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS
+   FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+   OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES (INCLUDING DATA LOSS
+   OR RENAMED FILES) OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT
+   OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+   USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Note: because commercial use is not allowed, this is a "source-available"
+license and not an OSI-approved open source license.
+
+Resumen en español: gratuito, solo para uso personal y NO comercial; no se
+puede vender ni usar en actividades comerciales. No descarga ni distribuye
+contenido protegido: solo renombra archivos que ya tienes. Sin garantía; los
+autores no se hacen responsables del uso ni de los daños o pérdida de datos.
