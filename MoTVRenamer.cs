@@ -1,7 +1,18 @@
-// MoTV Renamer - FREE movie and TV series renamer for Windows (C# / WinForms). Personal, non-commercial use only.
+﻿// MoTV Renamer - FREE movie and TV series renamer for Windows (C# / WinForms). Personal, non-commercial use only.
 // Author: teleonline - https://github.com/teleonline/MoTVRenamer - License: personal, non-commercial use (see LICENSE)
 // Sources: TMDb, IMDb (keyless search), OMDb and TheTVDB.
 // Compatible with the compiler that ships with Windows (C# 5, .NET Framework 4.x). Nothing to install.
+//
+// HOW IT WORKS, IN SHORT
+//  1. You add video files or a folder. The program reads only their names, never their contents.
+//  2. It looks up each title on TMDb, IMDb, OMDb and TheTVDB (public movie/TV databases).
+//  3. You review the proposed names and confirm. Only then are files renamed.
+//
+// WHAT THE PROGRAM DOES NOT DO
+//  - It does not download, upload or share your files.
+//  - It only talks to the four movie/TV databases above (over HTTPS) to look up titles.
+//  - It only saves its own settings in %APPDATA%\MoTVRenamer (nothing else on your PC).
+//  - It never overwrites an existing file, and the last rename can always be undone.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -11,19 +22,33 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 
+[assembly: AssemblyTitle("MoTV Renamer")]
+[assembly: AssemblyDescription("Free renamer for movies and TV series. Personal, non-commercial use.")]
+[assembly: AssemblyCompany("teleonline")]
+[assembly: AssemblyProduct("MoTV Renamer")]
+[assembly: AssemblyCopyright("Copyright (c) 2026 teleonline")]
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
+
 namespace MoTVRenamer
 {
+    // Starts the program and shows any unexpected error in a message box instead of closing silently.
     static class Program
     {
         [STAThread]
         static void Main()
         {
-            try { ServicePointManager.SecurityProtocol = (SecurityProtocolType)(3072 | 768 | 192); } catch (Exception) { }
+            try { ServicePointManager.SecurityProtocol = (SecurityProtocolType)(3072 | 12288); }   // secure connections only (TLS 1.2 / 1.3)
+            catch (Exception)
+            {
+                try { ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072; } catch (Exception) { }
+            }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.ThreadException += delegate(object so, ThreadExceptionEventArgs ea)
@@ -38,7 +63,8 @@ namespace MoTVRenamer
         }
     }
 
-    // ------------------------------------------------------------------ estilo
+    // ------------------------------------------------------------------ look and feel (colors, dark/light theme)
+    // Colors and styles for the dark/light theme. Purely visual; nothing here touches your files.
     static class Ui
     {
         public static bool IsDark;
@@ -56,7 +82,7 @@ namespace MoTVRenamer
 
         static Ui() { SetDark(false); }
 
-        // "dark", "light" o "auto" (sigue el tema de aplicaciones de Windows)
+        // "dark", "light" or "auto" (follows the Windows app theme)
         public static bool Resolve(string theme)
         {
             if (theme == "dark") return true;
@@ -102,7 +128,7 @@ namespace MoTVRenamer
             return new Font("Segoe UI", 9.5f);
         }
 
-        // kind: 0 secundario, 1 principal, 2 discreto (sobre la barra oscura)
+        // kind: 0 = normal button, 1 = main button, 2 = subtle button (on the dark top bar)
         public static void Style(Button b, int kind)
         {
             b.Tag = kind;
@@ -137,7 +163,7 @@ namespace MoTVRenamer
             }
         }
 
-        // Aplica los colores del tema a un control y a todos sus hijos
+        // Applies the theme colors to a control and everything inside it
         public static void Theme(Control c)
         {
             string tag = c.Tag as string;
@@ -170,14 +196,14 @@ namespace MoTVRenamer
             foreach (Control k in c.Controls) Theme(k);
         }
 
-        // Etiquetas de los dialogos: color de texto explicito (no depender del heredado)
+        // Dialog labels: set the text color explicitly so it is always readable
         public static void FixLabels(Control c)
         {
             if (c is Label && !(c is LinkLabel) && !"muted".Equals(c.Tag)) c.ForeColor = Text;
             foreach (Control k in c.Controls) FixLabels(k);
         }
 
-        // Barra de titulo oscura (Windows 10 1903 o superior / Windows 11)
+        // Dark title bar (Windows 10 version 1903 or newer / Windows 11)
         public static void TitleBar(Form f)
         {
             if (!f.IsHandleCreated) return;
@@ -191,7 +217,8 @@ namespace MoTVRenamer
         }
     }
 
-    // ------------------------------------------------------------------ idioma de la interfaz (ES / EN)
+    // ------------------------------------------------------------------ interface language (English / Spanish)
+    // All texts shown on screen, in English and Spanish.
     static class L
     {
         public static bool En;
@@ -199,7 +226,7 @@ namespace MoTVRenamer
         static readonly Dictionary<string, string[]> S = new Dictionary<string, string[]>
         {
             { "title", new string[] { "MoTV Renamer – Renombrador gratuito de películas y series (uso personal)", "MoTV Renamer – Free renamer for movies and TV series (personal use)" } },
-            { "tagline", new string[] { "Renombrador gratuito · solo uso personal, no comercial", "Free renamer · personal, non-commercial use only" } },
+            { "tagline", new string[] { "Renombrador de películas y series", "Movie and TV series renamer" } },
             { "legal", new string[] { "MoTV Renamer es un programa GRATUITO para renombrar películas y series, de uso personal y NO comercial: no se puede vender, alquilar ni usar en ninguna actividad comercial. No descarga, distribuye ni da acceso a contenido protegido y no elude ninguna protección: solo cambia el nombre de archivos que ya tienes, usando datos de bases de datos online públicas. Eres el único responsable de los archivos que renombras y de cumplir las leyes de tu país y las condiciones de TMDb, OMDb, TheTVDB e IMDb. El programa se ofrece «tal cual», sin garantía de ningún tipo; los autores no se hacen responsables de daños, pérdida de datos ni de un mal uso. Haz copia de seguridad antes de renombrar.", "MoTV Renamer is a FREE program for renaming movies and TV series, for personal, NON-commercial use only: it must not be sold, rented or used in any commercial activity. It does not download, distribute or give access to copyrighted content and does not bypass any protection: it only renames files you already have, using data from public online databases. You alone are responsible for the files you rename and for complying with the laws of your country and the terms of TMDb, OMDb, TheTVDB and IMDb. The software is provided “as is”, without warranty of any kind; the authors accept no liability for damage, data loss or misuse. Back up your files before renaming." } },
             { "step1", new string[] { "Añadir", "Add" } },
             { "step2", new string[] { "Buscar", "Search" } },
@@ -330,6 +357,9 @@ namespace MoTVRenamer
             { "set_ui_auto", new string[] { "Automático", "Automatic" } },
             { "set_ui_restart", new string[] { "Si cambias el idioma, el programa se reinicia solo para aplicarlo.", "If you change the language, the program restarts by itself to apply it." } },
             { "set_save", new string[] { "Guardar", "Save" } },
+            { "set_wipe", new string[] { "Borrar ajustes", "Delete settings" } },
+            { "wipe_q", new string[] { "Se borrarán tus ajustes, tus claves de API, el contador de llamadas y el registro para deshacer (carpeta {p}). Tus películas y series no se tocan.\n\nEl programa se cerrará. ¿Continuar?", "This will delete your settings, API keys, call counter and undo history (folder {p}). Your movies and series are not touched.\n\nThe program will close. Continue?" } },
+            { "wipe_done", new string[] { "Datos borrados. Para desinstalar del todo, borra también el archivo MoTVRenamer.exe.", "Data deleted. To uninstall completely, also delete the MoTVRenamer.exe file." } },
             { "tips_title", new string[] { "Instrucciones", "Instructions" } },
             { "close", new string[] { "Cerrar", "Close" } },
             { "wel_title", new string[] { "Bienvenido a MoTV Renamer", "Welcome to MoTV Renamer" } },
@@ -346,7 +376,7 @@ namespace MoTVRenamer
             return CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToLowerInvariant() == "es" ? "es" : "en";
         }
 
-        // T("clave", "nombre", valor, ...) sustituye {nombre} por el valor
+        // T("key", "name", value, ...) returns the text for the key and replaces {name} with the value
         public static string T(string key, params object[] kv)
         {
             string[] v;
@@ -358,7 +388,7 @@ namespace MoTVRenamer
         }
     }
 
-    // ------------------------------------------------------------------ modelos
+    // ------------------------------------------------------------------ data the program works with
     class Candidate
     {
         public string Title = "";
@@ -376,12 +406,12 @@ namespace MoTVRenamer
         public string Kind = "movie";   // movie | tv
         public string Season = "";
         public string Ep = "";
-        public string Ep2 = "";         // ultimo episodio si es doble (S01E12-E13)
+        public string Ep2 = "";         // last episode if it is a double episode (S01E12-E13)
         public string EpTitle = "";
         public bool IsTv { get { return Kind == "tv"; } }
     }
 
-    // Pista de serie sacada del nombre del archivo (S01E02, "Serie - Episodio"...)
+    // Clue that a file is a TV episode, taken from its name (S01E02, "Series - Episode"...)
     class Hint
     {
         public string Series = "";
@@ -404,8 +434,8 @@ namespace MoTVRenamer
         public bool Skip;
         public bool Searched;
         public bool Confirmed;
-        public bool Done;   // ya renombrado en esta sesion
-        public bool Manual; // archivo suelto anadido a mano (no viene de la carpeta)
+        public bool Done;   // already renamed in this session
+        public bool Manual; // single file added by hand (not from the chosen folder)
         public Hint Hint;
     }
 
@@ -415,12 +445,22 @@ namespace MoTVRenamer
         public string Dst;
     }
 
-    // ------------------------------------------------------------------ JSON minimo
+    // ------------------------------------------------------------------ small JSON reader (the databases reply in JSON)
     static class Json
     {
         public static object Parse(string text)
         {
             int i = 0;
+            int depth = 0;   // reject absurdly nested data, so a bad reply cannot crash the program
+            bool inStr = false;
+            for (int k = 0; k < text.Length; k++)
+            {
+                char ch = text[k];
+                if (inStr) { if (ch == '\\') k++; else if (ch == '"') inStr = false; }
+                else if (ch == '"') inStr = true;
+                else if (ch == '{' || ch == '[') { if (++depth > 100) throw new FormatException("JSON demasiado anidado"); }
+                else if (ch == '}' || ch == ']') depth--;
+            }
             return Value(text, ref i);
         }
 
@@ -490,7 +530,7 @@ namespace MoTVRenamer
         static string Str(string s, ref int i)
         {
             StringBuilder sb = new StringBuilder();
-            i++; // comilla de apertura
+            i++; // opening quote
             while (i < s.Length)
             {
                 char c = s[i++];
@@ -528,7 +568,7 @@ namespace MoTVRenamer
             return double.Parse(s.Substring(st, i - st), CultureInfo.InvariantCulture);
         }
 
-        // ---- ayudantes de lectura
+        // ---- reading helpers
         public static string S(Dictionary<string, object> d, string k) { return S(d, k, ""); }
 
         public static string S(Dictionary<string, object> d, string k, string def)
@@ -600,15 +640,18 @@ namespace MoTVRenamer
         }
     }
 
-    // ------------------------------------------------------------------ configuracion
+    // ------------------------------------------------------------------ settings (saved in %APPDATA%\MoTVRenamer\config.json)
+    // The user's settings (API keys, name formats, language, theme).
+    // Saved as a plain text file in %APPDATA%\MoTVRenamer\config.json and never sent anywhere except
+    // each key to its own service. "Settings > Delete settings" removes this folder.
     class Config
     {
         public string TmdbKey = "";
         public string OmdbKey = "";
         public string TvdbKey = "";
         public string TvdbPin = "";
-        public string Language = "es-ES";      // codigo que entienden las APIs
-        public string LanguageUi = "";         // lo elegido en el desplegable (p. ej. valenciano)
+        public string Language = "es-ES";      // language code the databases understand
+        public string LanguageUi = "";         // what was picked in the dropdown (e.g. Valencian)
         public string Primary = "TMDb";
         public string Template = "{title} ({year})";
         public string TvTemplate = "{series} - {sxe} - {ep_title}";
@@ -621,8 +664,8 @@ namespace MoTVRenamer
         public bool FolderPerMovie;
         public bool Recursive;
 
-        // Idiomas del desplegable (codigos de TMDb). El valenciano no tiene codigo propio en las bases de datos:
-        // se piden en catalan (ca-ES), que es donde esta su contenido.
+        // Languages in the dropdown (TMDb codes). Valencian has no code of its own in the databases,
+        // so it is requested as Catalan (ca-ES), where its content is stored.
         public static readonly string[][] Languages = new string[][]
         {
             new string[] { "es-ES", "Español (España)" }, new string[] { "es-MX", "Español (México)" },
@@ -651,11 +694,11 @@ namespace MoTVRenamer
             foreach (string[] l in Languages)
                 if (string.Equals(l[0], code, StringComparison.OrdinalIgnoreCase)) return l[0] + "  " + l[1];
             if (!string.IsNullOrEmpty(code) && code.StartsWith("ca-", StringComparison.OrdinalIgnoreCase))
-                return LangDisplay("ca-ES");   // configuraciones antiguas con "ca-ES-valencia"
+                return LangDisplay("ca-ES");   // old settings that saved "ca-ES-valencia"
             return code ?? "";
         }
 
-        // 'ca-ES  Català' -> 'ca-ES' (tambien acepta un codigo escrito a mano)
+        // 'ca-ES  Català' -> 'ca-ES' (also accepts a code typed by hand)
         public static string LangCode(string text)
         {
             string t = (text ?? "").Trim();
@@ -663,7 +706,7 @@ namespace MoTVRenamer
             return i > 0 ? t.Substring(0, i) : t;
         }
 
-        // Codigo que entienden las APIs: 'ca-ES-valencia' -> 'ca-ES'
+        // Code the databases understand: 'ca-ES-valencia' -> 'ca-ES'
         public static string ApiLanguage(string code)
         {
             string[] p = (string.IsNullOrEmpty(code) ? "es-ES" : code).Split('-');
@@ -678,7 +721,7 @@ namespace MoTVRenamer
             if (!Directory.Exists(p))
             {
                 Directory.CreateDirectory(p);
-                try   // migra la configuracion de versiones anteriores (se llamaba PeliRenamer)
+                try   // copy the settings of earlier versions (the program used to have other names)
                 {
                     foreach (string oldName in new string[] { "MediaRenamer", "PeliRenamer" })
                     {
@@ -765,10 +808,12 @@ namespace MoTVRenamer
         }
     }
 
-    // ------------------------------------------------------------------ nombres
+    // ------------------------------------------------------------------ name cleaning and building
+    // Turns messy file names ("Matrix.1999.1080p.BluRay.x264-GRP.mkv") into a clean title and year,
+    // and builds the final name ("Matrix (1999)") from the template chosen in Settings.
     static class Names
     {
-        // Marcas "fuertes" de release: a partir de la primera se descarta el resto del nombre.
+        // Strong release tags (1080p, BluRay...): everything after the first one is thrown away.
         const string Strong =
             @"2160p|1080p|1080i|720p|576p|480p|4k|uhd|" +
             @"blu[\s-]?ray|bd[\s-]?rip|br[\s-]?rip|bd[\s-]?remux|web[\s-]?rip|web[\s-]?dl|hd[\s-]?rip|dvd[\s-]?rip|" +
@@ -780,8 +825,8 @@ namespace MoTVRenamer
 
         static readonly Regex StrongRe = new Regex(@"(?<![a-z0-9])(?:" + Strong + @")(?![a-z0-9])", RegexOptions.IgnoreCase);
 
-        // Palabras "debiles" (idiomas, etiquetas de audio/subtitulos): solo se quitan dentro de parentesis/corchetes
-        // o al final del titulo, porque tambien pueden ser parte de un titulo real ("The English Patient").
+        // Weak tags (languages, audio/subtitle labels): only removed inside brackets or at the end
+        // of the title, because they can also be part of a real title ("The English Patient").
         static readonly HashSet<string> Weak = new HashSet<string>(
             ("catala catalan castellano espanol spanish spa esp ingles english eng japones japanese jap jpn " +
              "frances french fra fre aleman german ger deu italiano italian ita portugues portuguese por ruso russian rus " +
@@ -798,7 +843,7 @@ namespace MoTVRenamer
             return m.Success ? m.Value.ToLowerInvariant() : "";
         }
 
-        // Minusculas y sin acentos (para comparar palabras)
+        // Lowercase and without accents (to compare words)
         public static string Fold(string text)
         {
             string d = text.ToLowerInvariant().Normalize(NormalizationForm.FormD);
@@ -811,7 +856,7 @@ namespace MoTVRenamer
         static readonly HashSet<string> Stop = new HashSet<string>(
             "el la los las un una de del y e en the a an of and le les des et il lo gli der die das".Split(' '));
 
-        // Palabras significativas (sin acentos, sin articulos/preposiciones, singularizadas a lo bruto)
+        // Meaningful words (no accents, no articles/prepositions, plurals roughly reduced)
         public static HashSet<string> SigTokens(string text)
         {
             HashSet<string> set = new HashSet<string>();
@@ -823,7 +868,7 @@ namespace MoTVRenamer
             return set;
         }
 
-        // Fraccion de palabras del nombre del archivo que aparecen en alguno de los titulos del candidato
+        // Share of the file name's words that appear in one of the candidate's titles
         public static double TitleCoverage(string fileTitle, Candidate c)
         {
             HashSet<string> ft = SigTokens(fileTitle);
@@ -837,7 +882,7 @@ namespace MoTVRenamer
             return (double)hit / ft.Count;
         }
 
-        // Un grupo (...) o [...] es ruido si solo lleva idiomas, resolucion, codec, grupo de release...
+        // A (...) or [...] group is noise if it only holds languages, resolution, codec, release group...
         static bool IsNoiseGroup(string content)
         {
             string[] toks = Regex.Split(Fold(content), "[^a-z0-9]+").Where(t => t.Length > 0).ToArray();
@@ -855,9 +900,9 @@ namespace MoTVRenamer
         public static void ParseName(string stem, out string title, out string year)
         {
             string s = Regex.Replace(stem, @"[._]+", " ");
-            s = Regex.Replace(s, @"\{[^}]*\}", " ");        // {imdb-tt0133093} estilo Plex
+            s = Regex.Replace(s, @"\{[^}]*\}", " ");        // {imdb-tt0133093} Plex-style tag
             s = ImdbRe.Replace(s, " ");
-            s = StripNoiseGroups(s);                          // (Catala Spanish Japanese), [1080p], [YTS.MX]...
+            s = StripNoiseGroups(s);                          // (Catalan Spanish Japanese), [1080p], [YTS.MX]...
             year = null;
             int cut = s.Length;
             MatchCollection ms = Regex.Matches(s, @"(?<!\d)(19\d{2}|20\d{2})(?!\d)");
@@ -868,31 +913,31 @@ namespace MoTVRenamer
             Match junk = StrongRe.Match(s);
             if (junk.Success && junk.Index < cut) cut = junk.Index;
             string t = s.Substring(0, cut);
-            // [Grupo] al principio (solo si queda un titulo con letras detras; "[REC] 2007" se conserva)
+            // [Group] at the start (only if a title with letters follows; "[REC] 2007" is kept)
             Match lead = Regex.Match(t, @"^\s*\[[^\]]*\]\s*(.*)$", RegexOptions.Singleline);
             if (lead.Success && Regex.IsMatch(lead.Groups[1].Value, @"[^\W\d_]{3,}")) t = lead.Groups[1].Value;
             t = Regex.Replace(t, @"[\(\)\[\]{}]", " ");
-            t = Regex.Replace(t, @"\s+[-–—]+\s+", " ");   // " - " como separador -> espacio
+            t = Regex.Replace(t, @"\s+[-–—]+\s+", " ");   // " - " used as a separator -> space
             t = Regex.Replace(t, @"\s+", " ").Trim(' ', '-', '–', '—', ',', ';', ':');
             List<string> words = new List<string>(t.Length > 0 ? t.Split(' ') : new string[0]);
             while (words.Count > 1 && Weak.Contains(Fold(words[words.Count - 1]).Trim('.', ',', ';', ':', '-')))
-                words.RemoveAt(words.Count - 1);                // idioma suelto al final
+                words.RemoveAt(words.Count - 1);                // stray language word at the end
             string res = string.Join(" ", words.ToArray());
             if (res.Length == 0) res = Regex.Replace(s, @"\s+", " ").Trim();
             title = res;
         }
 
-        // ---- series
+        // ---- TV series
         static readonly Regex EpRe = new Regex(@"(?<![a-z0-9])s(\d{1,2})[\s._-]?e(\d{1,3})(?:[\s._-]?(?:e|-e?)(\d{1,3}))?(?![a-z0-9])", RegexOptions.IgnoreCase);
         static readonly Regex EpXRe = new Regex(@"(?<![a-z0-9])(\d{1,2})x(\d{2,3})(?:-(\d{2,3}))?(?![a-z0-9])", RegexOptions.IgnoreCase);
-        // "(Parte I)", "Part 2", "Pt. 1"... al final del titulo de un episodio
+        // "(Part I)", "Part 2", "Pt. 1"... at the end of an episode title
         static readonly Regex PartRe = new Regex(@"\s*[\(\[]?\s*(?:parte|part|pt\.?|partie|teil)\s*(?:[ivx]+|\d+)\s*[\)\]]?\s*$", RegexOptions.IgnoreCase);
 
         static bool HasWords(string text) { return Regex.IsMatch(text ?? "", @"[^\W\d_]{2,}"); }
 
         public static string BaseEpName(string name) { return PartRe.Replace(name ?? "", "").Trim(); }
 
-        // Quita ruido de release (llaves, IDs de IMDb, grupos de idioma/calidad) y corta en la primera marca tecnica
+        // Removes release noise (braces, IMDb IDs, language/quality groups) and cuts at the first technical tag
         static string CleanRelease(string s)
         {
             s = Regex.Replace(s, @"[._]+", " ");
@@ -909,7 +954,7 @@ namespace MoTVRenamer
         static readonly HashSet<string> GenericDirs = new HashSet<string>(
             ("series serie tv shows series_tv video videos downloads descargas peliculas movies").Split(' '));
 
-        // Serie deducida de las carpetas: ...\Bola de Drac\Season 01 -> "Bola de Drac"
+        // Series name taken from the folders: ...\Dragon Ball\Season 01 -> "Dragon Ball"
         public static string SeriesFromFolder(string folder, out string year)
         {
             year = null;
@@ -933,7 +978,7 @@ namespace MoTVRenamer
             return "";
         }
 
-        // Detecta S01E02, S01E02-E03, 1x02...
+        // Detects S01E02, S01E02-E03, 1x02...
         public static Hint ParseEpisode(string stem, string folder)
         {
             string s = Regex.Replace(stem, @"[._]+", " ");
@@ -943,7 +988,7 @@ namespace MoTVRenamer
             string before = s.Substring(0, m.Index);
             string rest = s.Substring(m.Index + m.Length);
             string series, year, epName = "";
-            if (HasWords(before))   // "Serie - S01E02 - Episodio"
+            if (HasWords(before))   // "Series - S01E02 - Episode"
             {
                 ParseName(before, out series, out year);
                 if (HasWords(rest))
@@ -951,16 +996,16 @@ namespace MoTVRenamer
                     string ignoredYear;
                     ParseName(rest, out epName, out ignoredYear);
                 }
-                if (StrongRe.IsMatch(epName)) epName = "";   // solo etiquetas tecnicas, sin titulo de episodio
+                if (StrongRe.IsMatch(epName)) epName = "";   // only technical tags, no episode title
             }
-            else   // "S01E02 - Serie - Episodio"
+            else   // "S01E02 - Series - Episode"
             {
                 string[] parts = new Regex(@"\s*[-–—]+\s+").Split(
                     CleanRelease(rest).Trim(' ', '-', '–', '—', '.', ',', ';', ':'), 2);
                 bool firstOk = HasWords(parts[0]);
                 string fYear = null;
                 string fSeries = !string.IsNullOrEmpty(folder) ? SeriesFromFolder(folder, out fYear) : "";
-                if (parts.Length == 1 && fSeries.Length > 0)   // "S01E02 - Titulo": la serie sale de la carpeta
+                if (parts.Length == 1 && fSeries.Length > 0)   // "S01E02 - Title": the series name comes from the folder
                 {
                     series = fSeries;
                     year = fYear;
@@ -996,7 +1041,7 @@ namespace MoTVRenamer
             return h;
         }
 
-        // Pista de serie: 'S01E02' explicito o formato 'Serie - Episodio' (separador ' - ')
+        // Series clue: an explicit 'S01E02' or the 'Series - Episode' format (separator ' - ')
         public static Hint MakeHint(string stem, string folder)
         {
             Hint ep = ParseEpisode(stem, folder);
@@ -1020,7 +1065,7 @@ namespace MoTVRenamer
             return int.TryParse(n, out v) ? v.ToString("00", CultureInfo.InvariantCulture) : n;
         }
 
-        // S01E12 o S01E12-E13 (episodio doble)
+        // S01E12 or S01E12-E13 (double episode)
         public static string EpisodeCode(Candidate c)
         {
             if (c.Ep.Length == 0) return "";
@@ -1044,11 +1089,11 @@ namespace MoTVRenamer
             d["tvdb_id"] = c.TvdbId;
             string o = Format(template, d);
             o = Regex.Replace(o, @"\(\s*\)|\[\s*\]", "");
-            o = Regex.Replace(o.Trim(), @"(\s+-)+\s*$", "");   // sin titulo de episodio: no deja " -" colgando
+            o = Regex.Replace(o.Trim(), @"(\s+-)+\s*$", "");   // no episode title: do not leave a dangling " -"
             return Sanitize(o);
         }
 
-        // Parecido entre el nombre del archivo y el candidato (para series se compara solo la parte de la serie)
+        // How well the file name matches a candidate (for series only the series part is compared)
         public static double CandCoverage(Item it, Candidate c)
         {
             if (c.IsTv)
@@ -1059,7 +1104,7 @@ namespace MoTVRenamer
             return TitleCoverage(it.Title, c);
         }
 
-        // Si el nombre parece de serie: ¿hay tambien una opcion del otro tipo (pelicula/serie) igual de buena?
+        // If the name looks like a series: is there an equally good option of the other kind (movie/series)?
         public static bool OtherKindMatch(Item it, Candidate c)
         {
             if (it.Hint == null) return false;
@@ -1068,17 +1113,21 @@ namespace MoTVRenamer
             return false;
         }
 
-        // Clave de orden: mejor parecido primero; entre iguales, las series con episodio encontrado
+        // Sort key: best match first; on a tie, series with a found episode go first
         public static double RankKey(Item it, Candidate c)
         {
             return -Math.Round(CandCoverage(it, c), 2) + ((c.IsTv && c.Ep.Length == 0) ? 0.001 : 0.0);
         }
 
+        static readonly Regex ReservedRe = new Regex(@"^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$", RegexOptions.IgnoreCase);
+
         public static string Sanitize(string name)
         {
             name = InvalidRe.Replace(name, "");
             name = Regex.Replace(name, @"\s+", " ").Trim();
-            return name.TrimEnd('.', ' ');
+            name = name.TrimEnd('.', ' ');
+            if (ReservedRe.IsMatch(name)) name = "_" + name;   // CON, NUL, COM1... are reserved names in Windows and cannot be used as file names
+            return name;
         }
 
         static string Format(string t, Dictionary<string, string> d)
@@ -1122,17 +1171,18 @@ namespace MoTVRenamer
             d["tvdb_id"] = c.TvdbId;
             d["rating"] = c.Rating > 0 ? c.Rating.ToString("0.0", CultureInfo.InvariantCulture) : "";
             string o = Format(template, d);
-            o = Regex.Replace(o, @"\(\s*\)|\[\s*\]", "");   // quita parentesis vacios si falta el anio
+            o = Regex.Replace(o, @"\(\s*\)|\[\s*\]", "");   // remove empty brackets if the year is missing
             return Sanitize(o);
         }
     }
 
-    // ------------------------------------------------------------------ contador de llamadas
+    // ------------------------------------------------------------------ counter of database requests
     class QuotaException : Exception
     {
         public QuotaException(string message) : base(message) { }
     }
 
+    // Counts how many requests were made to each database, so the free daily limits are respected.
     static class Usage
     {
         static readonly object Gate = new object();
@@ -1180,7 +1230,7 @@ namespace MoTVRenamer
             catch (Exception) { }
         }
 
-        // Cuenta una llamada. Para OMDb aplica el limite diario (se guarda en disco y se reinicia cada dia).
+        // Counts one request. For OMDb it applies the daily limit (saved on disk, resets every day).
         public static void Count(string source)
         {
             lock (Gate)
@@ -1225,6 +1275,7 @@ return L.T("usage", "a", SessionCount("TMDb"), "b", SessionCount("TVDB"), "c", S
         }
     }
 
+    // Text of the "Instructions" window.
     static class Help
     {
         const string Es = @"INSTRUCCIONES
@@ -1308,17 +1359,21 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
         public static string Get() { return L.En ? En : Es; }
     }
 
-    // ------------------------------------------------------------------ APIs
+    // ------------------------------------------------------------------ the online databases (TMDb, IMDb, OMDb, TheTVDB)
+    // Talks to the online databases. This is the ONLY part of the program that uses the internet:
+    // it only asks for titles, years and episode names, over secure HTTPS connections.
+    // No file names are changed here and no files are sent.
     static class Api
     {
         public static readonly string[] Order = new string[] { "TMDb", "IMDb", "OMDb", "TVDB" };
         public static readonly string[] Choices = new string[] { "TMDb", "IMDb", "OMDb", "TVDB", "Todas" };
         const string ImdbUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MoTVRenamer/1.1 (+https://github.com/teleonline/MoTVRenamer)";
 
-        // Corte inmediato: «Cancelar» aborta las llamadas en curso y rechaza las siguientes
+        // Immediate stop: "Cancel" aborts requests in progress and refuses new ones
         static volatile bool aborted;
         static readonly List<HttpWebRequest> Active = new List<HttpWebRequest>();
 
+        // Called when a search or rename starts.
         public static void BeginOperation() { aborted = false; }
 
         public static void Abort()
@@ -1339,6 +1394,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             if (aborted) throw new OperationCanceledException("Cancelado");
         }
 
+        // Sends one request to a database and returns its reply (with a time limit and a size limit).
         static string Get(string url, string bearer, string ua, string lang)
         {
             string src = Usage.SourceOf(url);
@@ -1351,7 +1407,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 req.Accept = "application/json";
                 req.Timeout = 15000;
                 req.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-                if (!string.IsNullOrEmpty(lang))   // idioma forzado tambien en la cabecera HTTP
+                if (!string.IsNullOrEmpty(lang))   // chosen language also sent in the request
                     req.Headers["Accept-Language"] = lang + "," + lang.Split('-')[0] + ";q=0.9,en;q=0.3";
                 if (bearer != null) req.Headers["Authorization"] = "Bearer " + bearer;
                 lock (Active) { Active.Add(req); }
@@ -1361,13 +1417,21 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                     using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
                     using (StreamReader sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
                     {
-                        return sr.ReadToEnd();
+                        StringBuilder body = new StringBuilder();
+                        char[] buf = new char[8192];
+                        int nr;
+                        while ((nr = sr.Read(buf, 0, buf.Length)) > 0)
+                        {
+                            body.Append(buf, 0, nr);
+                            if (body.Length > 8 * 1024 * 1024) throw new Exception("Respuesta demasiado grande");   // safety limit
+                        }
+                        return body.ToString();
                     }
                 }
                 catch (WebException wex)
                 {
                     HttpWebResponse hr = wex.Response as HttpWebResponse;
-                    if (attempt == 0 && hr != null && (int)hr.StatusCode == 429)   // demasiadas peticiones: espera y reintenta una vez
+                    if (attempt == 0 && hr != null && (int)hr.StatusCode == 429)   // too many requests: wait and try once more
                     {
                         int wait;
                         if (!int.TryParse(hr.Headers["Retry-After"], out wait)) wait = 3;
@@ -1398,8 +1462,8 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
         {
             string q = Qs(kv);
             string bearer = null;
-            if (cfg.TmdbKey.StartsWith("eyJ")) bearer = cfg.TmdbKey;   // token v4
-            else q += (q.Length > 0 ? "&" : "") + "api_key=" + Enc(cfg.TmdbKey); // clave v3
+            if (cfg.TmdbKey.StartsWith("eyJ")) bearer = cfg.TmdbKey;   // TMDb token
+            else q += (q.Length > 0 ? "&" : "") + "api_key=" + Enc(cfg.TmdbKey); // TMDb key
             string txt = Get("https://api.themoviedb.org/3" + path + "?" + q, bearer, null, cfg.Language);
             return Json.D(Json.Parse(txt));
         }
@@ -1415,10 +1479,10 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             if (name == "TMDb") return c.TmdbKey.Length > 0;
             if (name == "OMDb") return c.OmdbKey.Length > 0;
             if (name == "TVDB") return c.TvdbKey.Length > 0;
-            return c.UseImdb;   // IMDb no necesita clave
+            return c.UseImdb;   // IMDb needs no key
         }
 
-        // ---- TheTVDB (API v4): clave de proyecto (+ PIN opcional si eres suscriptor)
+        // ---- TheTVDB: project key (+ optional PIN for subscribers)
         static readonly Dictionary<string, string> TvdbLangs = new Dictionary<string, string>
         {
             { "es", "spa" }, { "en", "eng" }, { "fr", "fra" }, { "de", "deu" }, { "it", "ita" }, { "pt", "por" },
@@ -1484,7 +1548,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 catch (WebException ex)
                 {
                     HttpWebResponse hr = ex.Response as HttpWebResponse;
-                    if (attempt == 0 && hr != null && hr.StatusCode == HttpStatusCode.Unauthorized) continue;   // token caducado
+                    if (attempt == 0 && hr != null && hr.StatusCode == HttpStatusCode.Unauthorized) continue;   // login expired
                     throw;
                 }
             }
@@ -1606,7 +1670,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                     if (id.StartsWith("tt") && (qid == "movie" || qid == "tvMovie" || qid == "video")) rows.Add(r);
                 }
                 if (!string.IsNullOrEmpty(year))
-                    rows = rows.OrderBy(r => Json.S(r, "y") == year ? 0 : 1).ToList();   // primero las del anio
+                    rows = rows.OrderBy(r => Json.S(r, "y") == year ? 0 : 1).ToList();   // results from that year first
                 foreach (Dictionary<string, object> r in rows.Take(8))
                 {
                     res.Add(new Candidate
@@ -1649,11 +1713,11 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return res;
         }
 
-        // Busca en la fuente principal y, si no hay resultados, en las demas.
-        // Con allSources (o "Todas") junta los resultados de todas las fuentes disponibles.
+        // Searches the main source and, if nothing is found, the others.
+        // With allSources (or "All") it combines the results of every available source.
         public static List<Candidate> Search(string title, string year, Config cfg, bool allSources, List<string> errors)
         {
-            // Solo la fuente elegida en "Buscar en:"; con "Todas" (o allSources) se juntan todas
+            // Only the source chosen in "Search in:"; with "All" (or allSources) they are combined
             List<string> order = new List<string>();
             if (cfg.Primary == "Todas")
             {
@@ -1684,7 +1748,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 {
                     if (x.ImdbId.Length > 0)
                     {
-                        if (seen.Contains(x.ImdbId)) continue;   // evita duplicados IMDb/OMDb
+                        if (seen.Contains(x.ImdbId)) continue;   // avoid IMDb/OMDb duplicates
                         seen.Add(x.ImdbId);
                     }
                     cands.Add(x);
@@ -1692,11 +1756,11 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 if (cands.Count > 0 && !allSources) break;
             }
 
-            // Idioma forzado: los resultados de IMDb/OMDb (que no traducen) se pasan por TMDb
+            // Forced language: IMDb/OMDb results (which are not translated) are translated through TMDb
             int nLoc = allSources ? cands.Count : Math.Min(1, cands.Count);
             for (int i = 0; i < nLoc; i++) LocalizeOne(cands[i], cfg);
 
-            // Tras localizar, quita duplicados que son la misma pelicula de TMDb
+            // After translating, remove duplicates that are the same TMDb movie
             HashSet<string> seenTmdb = new HashSet<string>();
             List<Candidate> uniq = new List<Candidate>();
             foreach (Candidate x in cands)
@@ -1747,7 +1811,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             }
         }
 
-        // IMDb/OMDb -> ficha de TheTVDB por ID de IMDb -> traduccion al idioma elegido
+        // IMDb/OMDb -> TheTVDB entry by IMDb ID -> translation into the chosen language
         static bool LocalizeViaTvdb(Candidate c, Config cfg)
         {
             try
@@ -1768,7 +1832,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return false;
         }
 
-        // Fuerza el idioma elegido en resultados que no vienen traducidos (IMDb, OMDb, TVDB sin traduccion)
+        // Applies the chosen language to results that come untranslated (IMDb, OMDb, TheTVDB)
         public static void LocalizeOne(Candidate c, Config cfg)
         {
             if (c.Localized) return;
@@ -1787,7 +1851,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             if (cfg.TvdbKey.Length > 0) LocalizeViaTvdb(c, cfg);
         }
 
-        // ---- Series (TMDb / TVDB / IMDb): busqueda, episodios y episodios dobles
+        // ---- Series (TMDb / TheTVDB / IMDb): search, episodes and double episodes
         static Candidate TvCand(Dictionary<string, object> r, string imdbId)
         {
             string n = Json.S(r, "name");
@@ -1845,7 +1909,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return ids;
         }
 
-        // ID de serie de IMDb -> ficha con episodios (TMDb si hay clave; si no, TVDB). IMDb no ofrece episodios.
+        // IMDb series ID -> entry with episodes (TMDb if there is a key; otherwise TheTVDB). IMDb does not list episodes.
         static Candidate MapImdbSeries(string imdb, Config cfg)
         {
             if (cfg.TmdbKey.Length > 0)
@@ -1883,7 +1947,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return null;
         }
 
-        // De donde salen los episodios de esta serie: "tvdb", "tmdb" o "" (sin acceso)
+        // Where this series' episodes come from: "tvdb", "tmdb" or "" (no access)
         static string Backend(Candidate c, Config cfg)
         {
             if ((c.Source == "TVDB" || c.TmdbId.Length == 0) && c.TvdbId.Length > 0 && cfg.TvdbKey.Length > 0) return "tvdb";
@@ -1911,7 +1975,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 catch (WebException)
                 {
                     if (page > 0) break;
-                    d = TvdbGet("/series/" + tvdbId + "/episodes/default", cfg, "page", "0");   // sin traduccion
+                    d = TvdbGet("/series/" + tvdbId + "/episodes/default", cfg, "page", "0");   // untranslated
                 }
                 foreach (object o in Json.L(DataOf(d, "data"), "episodes"))
                 {
@@ -1992,7 +2056,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             public string Title = "";
         }
 
-        // Fraccion de palabras del titulo buscado que aparecen en el titulo del episodio (sin la marca de parte)
+        // Share of the searched title's words that appear in the episode title (ignoring the part marker)
         static double EpCov(HashSet<string> want, string epName)
         {
             HashSet<string> have = Names.SigTokens(Names.BaseEpName(epName));
@@ -2012,7 +2076,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             r.Ep = h.Ep;
             r.Ep2 = h.Ep2;
             r.Title = Json.S(hit, "name");
-            if (r.Ep2 > 0)   // el archivo ya declara el rango (S01E12-E13)
+            if (r.Ep2 > 0)   // the file name already gives the range (S01E12-E13)
             {
                 foreach (Dictionary<string, object> e2 in eps)
                 {
@@ -2031,7 +2095,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             HashSet<string> want = Names.SigTokens(h.EpName);
             if (want.Count == 0) return null;
             List<int> seasons = SeasonNumbers(c, cfg);
-            seasons.Add(0);   // especiales al final
+            seasons.Add(0);   // specials last
             Dictionary<string, object> best = null;
             double bestCov = 0;
             int bestSeason = -1;
@@ -2052,7 +2116,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             r.Ep = EpNum(best);
             r.Title = Json.S(best, "name");
             string bas = Names.BaseEpName(r.Title);
-            if (bas != r.Title.Trim())   // lleva marca de parte: buscar las demas partes consecutivas
+            if (bas != r.Title.Trim())   // has a part marker: look for the other consecutive parts
             {
                 HashSet<int> nums = new HashSet<int>();
                 foreach (Dictionary<string, object> e4 in SeasonEps(c, bestSeason, cfg))
@@ -2071,9 +2135,9 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return r;
         }
 
-        // Rellena temporada/episodio/titulo de una serie. Une los episodios 'Parte I/II' en uno doble.
-        // Usa el SxxExx del nombre; si el titulo del episodio no cuadra (numeraciones distintas entre fuentes),
-        // busca por el titulo que trae el nombre.
+        // Fills in season/episode/title for a series. Joins 'Part I/II' episodes into one double episode.
+        // Uses the SxxExx in the name; if the episode title does not match (sources number episodes differently),
+        // it searches by the title found in the name.
         public static bool ResolveEpisode(Candidate c, Hint h, Config cfg)
         {
             if (h == null || Backend(c, cfg).Length == 0) return false;
@@ -2097,7 +2161,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return true;
         }
 
-        // Misma serie (por cualquiera de sus IDs): completa los IDs que falten; si no, la anade
+        // Same series (by any of its IDs): fills in the missing IDs; otherwise adds it
         static void AddSeries(List<Candidate> res, Candidate c)
         {
             foreach (Candidate x in res)
@@ -2114,7 +2178,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             res.Add(c);
         }
 
-        // Series en las fuentes elegidas en "Buscar en:". Con pista, localiza el episodio en cada una.
+        // Series from the sources chosen in "Search in:". With a clue, it finds the episode in each one.
         public static List<Candidate> SearchTv(string series, string year, Config cfg, Hint hint, bool allSources, List<string> errors)
         {
             List<Candidate> res = new List<Candidate>();
@@ -2195,7 +2259,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return res;
         }
 
-        // Peliculas + (si el nombre parece de serie) series
+        // Movies + (if the name looks like a series) series
         public static List<Candidate> SearchAll(string title, string year, Hint hint, Config cfg, bool allSources, List<string> errors)
         {
             List<Candidate> cands = new List<Candidate>();
@@ -2205,13 +2269,13 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             {
                 string ys = !string.IsNullOrEmpty(year) ? year : hint.Year;
                 List<Candidate> tv = SearchTv(hint.Series, ys, cfg, hint, allSources, errors);
-                tv.AddRange(cands);   // empate de parecido: gana la serie si se encontro el episodio
+                tv.AddRange(cands);   // tie: the series wins if its episode was found
                 cands = tv;
             }
             return cands;
         }
 
-        // Todo el flujo de busqueda de un archivo: ID de IMDb en el nombre, peliculas y series
+        // The whole search for one file: IMDb ID in the name, movies and series
         public static List<Candidate> FindForItem(Item it, Config cfg, List<string> errs)
         {
             List<Candidate> cands = new List<Candidate>();
@@ -2234,7 +2298,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
 
         static bool Allowed(string name, Config cfg) { return cfg.Primary == "Todas" || cfg.Primary == name; }
 
-        // Coincidencia exacta a partir de un ID de IMDb (tt1234567)
+        // Exact match from an IMDb ID (tt1234567)
         public static List<Candidate> LookupByImdb(string imdbId, Config cfg, List<string> errors)
         {
             List<Candidate> res = new List<Candidate>();
@@ -2262,7 +2326,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                         });
                         break;
                     }
-                    if (res.Count == 0)   // el ID puede ser de una serie
+                    if (res.Count == 0)   // the ID may belong to a series
                     {
                         foreach (object to in Json.L(found, "tv_results"))
                         {
@@ -2272,14 +2336,14 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                             break;
                         }
                     }
-                    if (res.Count == 0)   // ...o de un episodio concreto
+                    if (res.Count == 0)   // ...or to a single episode
                     {
                         foreach (object eo in Json.L(found, "tv_episode_results"))
                         {
                             Dictionary<string, object> er = Json.D(eo);
                             if (er == null) continue;
                             Dictionary<string, object> show = Tmdb("/tv/" + Json.S(er, "show_id"), cfg, "language", cfg.Language);
-                            Candidate ec = TvCand(show, "");   // el ID de IMDb era del episodio: la serie lo obtiene en Enrich()
+                            Candidate ec = TvCand(show, "");   // the IMDb ID was an episode's: the series gets it in Enrich()
                             ec.Season = Json.S(er, "season_number");
                             ec.Ep = Json.S(er, "episode_number");
                             ec.EpTitle = Json.S(er, "name");
@@ -2353,11 +2417,11 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return res;
         }
 
-        // Cruza IDs entre fuentes y completa rating / titulos alternativos
+        // Cross-links IDs between sources and fills in rating / alternative titles
         public static void Enrich(Candidate c, Config cfg)
         {
             if (c.Enriched) return;
-            if (c.IsTv)   // serie: IDs de IMDb/TVDB desde la ficha de su fuente
+            if (c.IsTv)   // series: IMDb/TheTVDB IDs from its source entry
             {
                 if (Backend(c, cfg) == "tvdb" && c.ImdbId.Length == 0)
                 {
@@ -2430,7 +2494,10 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
         }
     }
 
-    // ------------------------------------------------------------------ archivos
+    // ------------------------------------------------------------------ files (finding videos, renaming, undo)
+    // Everything that touches files on your PC: finding videos, renaming them and undoing.
+    // Safety rules: a file is never overwritten, nothing is deleted, and every rename is written
+    // to an undo log so the last rename can be reversed.
     static class Files
     {
         static readonly HashSet<string> VideoExt = new HashSet<string>(
@@ -2447,7 +2514,11 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 foreach (string f in Directory.GetFiles(dir))
                     if (VideoExt.Contains(Path.GetExtension(f))) outp.Add(f);
                 if (recursive)
-                    foreach (string d in Directory.GetDirectories(dir)) Walk(d, recursive, outp);
+                    foreach (string d in Directory.GetDirectories(dir))
+                    {
+                        if ((File.GetAttributes(d) & FileAttributes.ReparsePoint) != 0) continue;   // skip folder shortcuts/links: avoids endless loops
+                        Walk(d, recursive, outp);
+                    }
             }
             catch (Exception) { }
         }
@@ -2462,7 +2533,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return l;
         }
 
-        // Subtitulos/nfo con el mismo nombre base (p.ej. peli.es.srt) -> {archivo, sufijo}
+        // Subtitles/info files with the same base name (e.g. movie.en.srt) -> {file, suffix}
         static List<string[]> Sidecars(string videoPath)
         {
             List<string[]> res = new List<string[]>();
@@ -2487,7 +2558,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return res;
         }
 
-        // Motivo por el que conviene revisar la coincidencia a mano ("" si es fiable)
+        // Reason why the match should be checked by hand ("" if it looks reliable)
         public static string ReviewReason(Item it)
         {
             if (it.Cands.Count == 0) return "";
@@ -2500,7 +2571,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 return Names.CandCoverage(it, c) < 0.6 ? L.T("why_title") : "";
             }
             if (it.Confirmed) return "";
-            if (it.ImdbId.Length > 0 && c.ImdbId == it.ImdbId) return "";   // el nombre ya trae el ID de IMDb
+            if (it.ImdbId.Length > 0 && c.ImdbId == it.ImdbId) return "";   // the file name already contains the IMDb ID
             if (Names.OtherKindMatch(it, c)) return L.T("why_kind");
             if (Names.TitleCoverage(it.Title, c) < 0.6) return L.T("why_title");
             if (string.IsNullOrEmpty(it.Year)) return L.T("why_noyear");
@@ -2509,14 +2580,14 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return "";
         }
 
-        public const int MaxRenames = 20;   // tamano de cada tanda (el renombrado encadena las tandas solo)
+        public const int MaxRenames = 20;   // size of each batch (batches are chained automatically)
 
         public static Plan PlanTarget(Item it, string template, bool folderPerMovie, string tvTemplate)
         {
             if (it.Cands.Count == 0) return null;
             int sel = it.Sel < it.Cands.Count ? it.Sel : 0;
             Candidate cd = it.Cands[sel];
-            if (cd.IsTv && cd.Ep.Length == 0) return null;   // serie sin episodio identificado: no se renombra
+            if (cd.IsTv && cd.Ep.Length == 0) return null;   // series without an identified episode: not renamed
             string b = cd.IsTv ? Names.BuildTv(tvTemplate, cd) : Names.Build(template, cd);
             if (b.Length == 0) return null;
             string ext = Path.GetExtension(it.FullPath);
@@ -2532,7 +2603,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return path;
         }
 
-        // Archivos que realmente cambiarian de nombre: los primeros 'limit'; 'left' = cuantos quedan pendientes
+        // Files that would really change name: the first 'limit'; 'left' = how many remain
         public static List<Item> PlanBatch(List<Item> items, string template, bool folderPerMovie, string tvTemplate,
                                            int limit, out int left)
         {
@@ -2547,7 +2618,8 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return pending.Take(limit).ToList();
         }
 
-        // Renombra como maximo 'limit' archivos. Devuelve el registro para deshacer.
+        // Renames at most 'limit' files. Returns the log used to undo.
+        // Safety: skips any file whose new name already exists, and logs each move so it can be undone.
         public static List<string[]> ApplyRenames(List<Item> items, string template, bool folderPerMovie, string tvTemplate,
                                                   int limit, Action<int, int> progress, Func<bool> shouldStop,
                                                   out List<string> errors, out int done, out int left)
@@ -2593,6 +2665,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
 
         static string LogPath() { return Path.Combine(Config.Dir(), "last_rename.json"); }
 
+        // Saves the list of moves (new path, old path) so the last rename can be undone later.
         public static void SaveUndo(List<string[]> log)
         {
             StringBuilder sb = new StringBuilder("[");
@@ -2605,6 +2678,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             File.WriteAllText(LogPath(), sb.ToString(), new UTF8Encoding(false));
         }
 
+        // Moves files back to their old names using the saved log.
         public static int UndoLast(out List<string> errors, out List<string[]> restored)
         {
             errors = new List<string>();
@@ -2621,6 +2695,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 if (pair == null || pair.Count < 2) continue;
                 string nw = Convert.ToString(pair[0]);
                 string old = Convert.ToString(pair[1]);
+                if (!Path.IsPathRooted(nw) || !Path.IsPathRooted(old)) continue;   // the undo log only accepts full paths
                 try
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(old));
@@ -2641,7 +2716,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
         }
     }
 
-    // ------------------------------------------------------------------ interfaz
+    // ------------------------------------------------------------------ user interface (windows and buttons)
     class Spinner : Control
     {
         System.Windows.Forms.Timer tm = new System.Windows.Forms.Timer();
@@ -2682,6 +2757,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
         }
     }
 
+    // The main window: the three steps (Add, Search, Rename).
     class MainForm : Form
     {
         const string App = "MoTV Renamer";
@@ -2701,8 +2777,8 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
         Button btnSearch;
         Button btnApply;
         Button btnCancel;
-        List<string> manualFiles = new List<string>();   // archivos sueltos anadidos a mano
-        HashSet<string> excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // quitados de la lista
+        List<string> manualFiles = new List<string>();   // single files added by hand
+        HashSet<string> excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // removed from the list
         volatile bool cancelRequested;
         ToolStripStatusLabel usageLbl;
         bool omdbWarned;
@@ -2732,10 +2808,10 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
 
         public MainForm()
         {
-            L.En = cfg.UiLang != "es";   // por defecto ingles
+            L.En = cfg.UiLang != "es";   // English by default
             Ui.SetDark(Ui.Resolve(cfg.Theme));
-            Text = L.T("title");
-            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }   // icono del exe
+            Text = "MoTV Renamer " + Version;
+            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }   // the program's own icon
             Font = Ui.Base();
             BackColor = Ui.Bg;
             ForeColor = Ui.Text;
@@ -2743,9 +2819,9 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             MinimumSize = new Size(980, 580);
             StartPosition = FormStartPosition.CenterScreen;
 
-            // Estos valores los edita el dialogo de Ajustes: viven en controles que no se muestran en la ventana principal.
+            // These values are edited in the Settings window; they live in controls that are not shown on the main window.
             txtFolder = new TextBox();
-            txtFolder.Text = "";   // la carpeta recordada (cfg.LastDir) solo se usa como punto de partida del selector
+            txtFolder.Text = "";   // the remembered folder (cfg.LastDir) is only used as the starting point of the folder picker
             txtTemplate = new TextBox();
             txtTemplate.Text = cfg.Template;
             txtTvTemplate = new TextBox();
@@ -2756,7 +2832,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             chkFolder.Checked = cfg.FolderPerMovie;
             chkFolder.CheckedChanged += delegate { RefreshRows(); };
 
-            // --- barra superior oscura con el nombre y los accesos a Ajustes y Consejos
+            // --- dark top bar with the name and the buttons for Settings, Instructions and About
             Panel header = new Panel();
             header.Dock = DockStyle.Top;
             header.Height = 52;
@@ -2806,7 +2882,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             cmbLang = new ComboBox();
             cmbLang.Width = 250;
             foreach (string[] lg in Config.Languages) cmbLang.Items.Add(lg[0] + "  " + lg[1]);
-            cmbLang.DropDownStyle = ComboBoxStyle.DropDownList;   // lista cerrada: sin texto seleccionado en azul
+            cmbLang.DropDownStyle = ComboBoxStyle.DropDownList;   // closed list: no blue selected text
             string curLang = Config.LangDisplay(cfg.LanguageUi.Length > 0 ? cfg.LanguageUi : cfg.Language);
             int langIdx = cmbLang.Items.IndexOf(curLang);
             if (langIdx < 0)
@@ -2827,7 +2903,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             btnCancel = Btn(L.T("btn_cancel"), delegate
             {
                 cancelRequested = true;
-                Api.Abort();   // corta tambien las llamadas a las APIs que estan en curso
+                Api.Abort();   // also stops any database requests in progress
                 SetStatus(L.T("cancelling"));
             });
             btnCancel.Enabled = false;
@@ -2835,7 +2911,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             btnCancel.EnabledChanged += delegate { btnCancel.Visible = btnCancel.Enabled; };
             btnApply = Btn(L.T("btn_apply"), delegate { DoApply(); }, 1);
 
-            // --- asistente: cada paso muestra solo sus controles encima de la lista
+            // --- wizard: each step shows only its own controls above the list
             Label lblLang = Lbl(L.T("lang_lbl"));
             lblLang.Margin = new Padding(0, 6, 6, 0);
             Label lblNote = Lbl(L.T("lang_note"));
@@ -2874,7 +2950,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             steps.Padding = new Padding(16, 14, 16, 8);
             for (int pi = 2; pi >= 0; pi--) steps.Controls.Add(pages[pi]);
 
-            // barra de pasos:  1. Anadir  >  2. Buscar  >  3. Renombrar
+            // step bar:  1. Add  >  2. Search  >  3. Rename
             stepBar = new Panel();
             stepBar.Dock = DockStyle.Top;
             stepBar.Height = 46;
@@ -2911,13 +2987,13 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 }
                 using (Pen bp = new Pen(Ui.Border)) g.DrawLine(bp, 0, stepBar.Height - 1, stepBar.Width, stepBar.Height - 1);
             };
-            stepBar.MouseClick += delegate(object so, MouseEventArgs ea)   // se puede volver a un paso anterior
+            stepBar.MouseClick += delegate(object so, MouseEventArgs ea)   // you can go back to an earlier step
             {
                 for (int i = 0; i < step; i++)
                     if (ea.X >= stepX[i] && ea.X <= stepX[i] + stepW[i]) GoStep(i);
             };
 
-            // --- tabla
+            // --- file table
             lv = new ListView();
             lv.Dock = DockStyle.Fill;
             lv.View = View.Details;
@@ -2928,13 +3004,13 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             lv.BorderStyle = BorderStyle.None;
             lv.BackColor = Ui.Card;
             lv.OwnerDraw = true;
-            ImageList rowSize = new ImageList();   // truco para subir la altura de las filas
+            ImageList rowSize = new ImageList();   // trick to make the rows taller
             rowSize.ImageSize = new Size(1, 30);
             lv.SmallImageList = rowSize;
             lv.Columns.Add(L.T("col_orig"), 400);
             lv.Columns.Add(L.T("col_new"), 400);
             lv.Columns.Add(L.T("col_state"), 250);
-            lv.Columns.Add("", 0);   // enlace «Ver en carpeta» por archivo (solo con archivos sueltos)
+            lv.Columns.Add("", 0);   // "Show in folder" link per file (only with single files)
             lv.DoubleClick += delegate { PickDialog(); };
             Font headFont = new Font("Segoe UI", 9f, FontStyle.Bold);
             lv.DrawColumnHeader += delegate(object so, DrawListViewColumnHeaderEventArgs ea)
@@ -2945,7 +3021,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                     new Rectangle(ea.Bounds.X + 10, ea.Bounds.Y, ea.Bounds.Width - 10, ea.Bounds.Height), Ui.Muted,
                     TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
             };
-            lv.DrawItem += delegate(object so, DrawListViewItemEventArgs ea) { };   // cada celda se pinta en DrawSubItem
+            lv.DrawItem += delegate(object so, DrawListViewItemEventArgs ea) { };   // each cell is drawn in DrawSubItem
             lv.DrawSubItem += delegate(object so, DrawListViewSubItemEventArgs ea)
             {
                 bool selected = ea.Item.Selected;
@@ -3002,11 +3078,11 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             rowTimer = new System.Windows.Forms.Timer();
             rowTimer.Interval = 50;
             rowTimer.Tick += delegate { rowAngle = (rowAngle + 30) % 360; lv.Invalidate(); };
-            lv.AllowDrop = true;   // arrastrar archivos o carpetas desde el Explorador
+            lv.AllowDrop = true;   // drag files or folders in from Windows Explorer
             lv.DragEnter += onEnter;
             lv.DragDrop += onDrop;
 
-            emptyLbl = new Label();   // guia para quien abre el programa por primera vez
+            emptyLbl = new Label();   // hint for first-time users
             emptyLbl.Text = L.T("empty_dd");
             emptyLbl.AutoSize = true;
             emptyLbl.ForeColor = Ui.Muted;
@@ -3031,7 +3107,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 lv.Cursor = OverLink(ea.Location, out idx) ? Cursors.Hand : Cursors.Default;
             };
 
-            Panel listWrap = new Panel();   // marco fino alrededor de la tabla
+            Panel listWrap = new Panel();   // thin frame around the table
             listWrap.Dock = DockStyle.Fill;
             listWrap.Padding = new Padding(1);
             listWrap.BackColor = Ui.Border;
@@ -3042,7 +3118,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             listOuter.Padding = new Padding(12, 4, 12, 4);
             listOuter.Controls.Add(listWrap);
 
-            // aviso que aparece sobre la lista mientras se buscan los nombres
+            // notice above the list (kept hidden; progress is shown in each row)
             searchBanner = new Panel();
             searchBanner.Dock = DockStyle.Top;
             searchBanner.Height = 44;
@@ -3068,7 +3144,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             searchBanner.Controls.Add(searchBar);
             listOuter.Controls.Add(searchBanner);
 
-            bottom2 = new FlowLayoutPanel();   // acciones sobre las filas seleccionadas
+            bottom2 = new FlowLayoutPanel();   // actions for the selected rows
             bottom2.Dock = DockStyle.Bottom;
             bottom2.Height = 44;
             bottom2.Padding = new Padding(12, 4, 0, 0);
@@ -3139,7 +3215,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             };
             usageTimer.Start();
 
-            // El control Fill va primero; los demas se acoplan despues (el ultimo anadido se acopla antes).
+            // The Fill control goes first; the others dock afterwards (the last one added docks first).
             Controls.Add(listOuter);
             Controls.Add(bottom2);
             Controls.Add(footer);
@@ -3206,7 +3282,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             btnNext.Enabled = !busy && (step == 0 ? items.Count > 0 : any);
         }
 
-        // Con archivos sueltos (mas de uno) cada fila lleva su propio «Ver en carpeta»; si no, un unico boton.
+        // With several single files each row has its own "Show in folder"; otherwise there is one button.
         bool PerFileMode() { return manualFiles.Count > 0 && items.Count > 1; }
 
         void LayoutColumns()
@@ -3230,7 +3306,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return index >= 0 && index < items.Count;
         }
 
-        // Abre el Explorador: con un archivo lo deja seleccionado; con una carpeta la abre
+        // Opens Windows Explorer: selects the file, or opens the folder
         void ShowInFolder(string path, bool selectFile)
         {
             try
@@ -3349,7 +3425,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             emptyLbl.Top = Math.Max(30, (lv.ClientSize.Height - emptyLbl.Height) / 2);
         }
 
-        // ---- utilidades de interfaz
+        // ---- interface helpers
         static Label Lbl(string text)
         {
             Label l = new Label();
@@ -3460,7 +3536,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             dlg.Controls.Add(pad);
             dlg.Controls.Add(foot);
             dlg.AcceptButton = close;
-            dlg.Shown += delegate { dlg.ActiveControl = close; };   // el texto no queda seleccionado en azul
+            dlg.Shown += delegate { dlg.ActiveControl = close; };   // so the text does not appear selected in blue
             ShowThemed(dlg);
         }
 
@@ -3470,7 +3546,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             cfg.TvTemplate = txtTvTemplate.Text;
             cfg.Recursive = chkRecursive.Checked;
             cfg.FolderPerMovie = chkFolder.Checked;
-            string ui = Config.LangCode(cmbLang.Text);   // lo elegido (p. ej. valenciano) y el codigo real para las APIs
+            string ui = Config.LangCode(cmbLang.Text);   // what was picked (e.g. Valencian) and the real code for the databases
             if (ui.Length == 0) ui = "es-ES";
             cfg.LanguageUi = ui;
             cfg.Language = Config.ApiLanguage(ui);
@@ -3591,7 +3667,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return it;
         }
 
-        // Lista = archivos de la carpeta (menos los quitados) + archivos sueltos anadidos a mano
+        // List = files in the folder (minus removed ones) + single files added by hand
         bool LoadFolder()
         {
             string folder = txtFolder.Text.Trim();
@@ -3642,7 +3718,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             }
         }
 
-        // Anade archivos (o carpetas, con sus videos) a la lista sin tocar los resultados ya buscados
+        // Adds files (or folders, with their videos) to the list without touching results already found
         void AddPaths(string[] paths)
         {
             if (busy) return;
@@ -3689,7 +3765,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             SetStatus(L.T("removed", "r", sel.Count, "n", items.Count));
         }
 
-        // ---- busqueda
+        // ---- searching for names
         void StartSearch()
         {
             if (busy) return;
@@ -3741,17 +3817,17 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                         List<Candidate> cands = new List<Candidate>();
                         try
                         {
-                            cands = Api.FindForItem(it, c, errs);   // ID en el nombre (exacto), peliculas y series
+                            cands = Api.FindForItem(it, c, errs);   // ID in the name (exact), movies and series
                             if (cands.Count > 0)
                             {
-                                for (int k = 0; k < cands.Count && k < 4; k++) Api.LocalizeOne(cands[k], c);   // idioma forzado antes de comparar
+                                for (int k = 0; k < cands.Count && k < 4; k++) Api.LocalizeOne(cands[k], c);   // apply the chosen language before comparing
                                 Item cur = it;
-                                cands = cands.OrderBy(x => Names.RankKey(cur, x)).ToList();   // estable: mejor parecido primero
+                                cands = cands.OrderBy(x => Names.RankKey(cur, x)).ToList();   // best match first
                                 Api.Enrich(cands[0], c);
                             }
                         }
                         catch (Exception ex) { errs.Add(ex.Message); }
-                        if (cancelRequested) break;   // cancelado a medias: este archivo se queda pendiente
+                        if (cancelRequested) break;   // cancelled midway: this file stays pending
                         foreach (string e in errs) allErrors.Add(e);
                         it.Cands = cands;
                         it.Sel = 0;
@@ -3831,7 +3907,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             return c.Title + " (" + c.Year + ")" + r + "  [" + c.Source + "]";
         }
 
-        // ---- elegir coincidencia
+        // ---- choosing a match by hand
         void PickDialog()
         {
             List<int> sel = SelectedIdx();
@@ -3887,12 +3963,12 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 dlg.Cursor = Cursors.WaitCursor;
                 try
                 {
-                    string imdb = Names.FindImdbId(q);   // acepta "tt0133093" o una URL de imdb.com
+                    string imdb = Names.FindImdbId(q);   // accepts "tt0133093" or an imdb.com link
                     if (imdb.Length > 0) cands = Api.LookupByImdb(imdb, cfg, errs);
                     else
                     {
                         Hint dh = Names.MakeHint(q, null);
-                        if (dh == null && it.Hint != null)   // busqueda manual dentro de una serie: conserva temporada/episodio
+                        if (dh == null && it.Hint != null)   // manual search inside a series: keeps season/episode
                         {
                             dh = new Hint();
                             dh.Series = q;
@@ -3928,7 +4004,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 it.Sel = idx;
                 it.Searched = true;
                 it.Skip = false;
-                it.Confirmed = true;   // elegida a mano: ya no se marca para revisar
+                it.Confirmed = true;   // picked by hand: no longer flagged for review
                 dlg.DialogResult = DialogResult.OK;
                 dlg.Close();
             };
@@ -3939,7 +4015,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             dlg.Controls.AddRange(new Control[] { lbl, txt, bSearch, lb, bOk });
             Cursor oldCur = Cursor;
             Cursor = Cursors.WaitCursor;
-            try { foreach (Candidate lc in list) Api.LocalizeOne(lc, cfg); }   // idioma forzado en toda la lista
+            try { foreach (Candidate lc in list) Api.LocalizeOne(lc, cfg); }   // apply the chosen language to the whole list
             finally { Cursor = oldCur; }
             fill();
             ShowThemed(dlg);
@@ -3957,14 +4033,14 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 Candidate c = it.Cands[it.Sel < it.Cands.Count ? it.Sel : 0];
                 Cursor = Cursors.WaitCursor;
                 try { Api.Enrich(c, cfg); } finally { Cursor = Cursors.Default; }
-                if (c.ImdbId.Length > 0) url = "https://www.imdb.com/title/" + c.ImdbId + "/";
+                if (Regex.IsMatch(c.ImdbId ?? "", @"^tt\d{7,10}$")) url = "https://www.imdb.com/title/" + c.ImdbId + "/";
             }
             if (url.Length == 0) url = "https://www.imdb.com/find/?s=tt&q=" + Uri.EscapeDataString(it.Title);
             try { Process.Start(url); }
             catch (Exception e) { MessageBox.Show(e.Message, App, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
 
-        // ---- renombrar / deshacer
+        // ---- rename / undo
         void SetProgress(int v, string msg)
         {
             if (v > searchBar.Maximum) v = searchBar.Maximum;
@@ -4051,7 +4127,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                         logAll.AddRange(log);
                         errorsAll.AddRange(errs);
                         doneTotal += done;
-                        if (logAll.Count > 0)   // se guarda tras cada tanda: si se cierra a medias, sigue siendo deshacible
+                        if (logAll.Count > 0)   // saved after every batch: if the program is closed midway, it can still be undone
                         {
                             try { Files.SaveUndo(logAll); }
                             catch (Exception ex) { errorsAll.Add(L.T("undo_save_err", "e", ex.Message)); }
@@ -4076,7 +4152,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             btnApply.Enabled = true;
             btnSearch.Enabled = true;
             btnCancel.Enabled = false;
-            manualFiles = items.Where(x => x.Manual).Select(x => x.FullPath).ToList();   // rutas nuevas tras renombrar
+            manualFiles = items.Where(x => x.Manual).Select(x => x.FullPath).ToList();   // new paths after renaming
             RefreshRows();
             string msg;
             if (cancelled)
@@ -4110,7 +4186,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             if (errors.Count > 0)
                 MessageBox.Show(string.Join(Environment.NewLine, errors.Take(15).ToArray()), App,
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            foreach (string[] pr in restored)   // los archivos sueltos vuelven a su ruta anterior
+            foreach (string[] pr in restored)   // single files go back to their previous path
             {
                 string nw = pr[0];
                 string old = pr[1];
@@ -4120,7 +4196,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             if (Directory.Exists(txtFolder.Text.Trim()) || manualFiles.Count > 0) LoadFolder();
         }
 
-        // ---- ajustes
+        // ---- settings
         static Label DLbl(string text, int x, int y, int w)
         {
             Label l = new Label();
@@ -4146,6 +4222,30 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             l.Tag = "muted";
             l.SetBounds(x, y, w, 18);
             return l;
+        }
+
+        // Deletes the program's data folder (and those of older versions) and closes without saving anything again.
+        void WipeData()
+        {
+            if (busy) { Info(L.T("wait_op")); return; }
+            string dir = Config.Dir();
+            if (MessageBox.Show(L.T("wipe_q", "p", dir), App, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            try
+            {
+                string root = Path.GetDirectoryName(dir);
+                foreach (string name in new string[] { "MoTVRenamer", "MediaRenamer", "PeliRenamer" })
+                {
+                    string d = Path.Combine(root, name);
+                    if (Directory.Exists(d)) Directory.Delete(d, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, App, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            MessageBox.Show(L.T("wipe_done"), App, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            Environment.Exit(0);   // exit right away so the settings are not written again
         }
 
         static LinkLabel KeyLink(string text, string url, int x, int y)
@@ -4234,8 +4334,13 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
 
             Button ok = new Button();
             ok.Text = L.T("set_save");
-            ok.SetBounds(250, 562, 100, 32);
+            ok.SetBounds(12, 562, 100, 32);
             Ui.Style(ok, 1);
+            Button wipe = new Button();
+            wipe.Text = L.T("set_wipe");
+            wipe.SetBounds(418, 562, 170, 32);
+            Ui.Style(wipe, 2);
+            wipe.Click += delegate { WipeData(); };
             ok.Click += delegate
             {
                 cfg.TmdbKey = t1.Text.Trim();
@@ -4247,7 +4352,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 cfg.OmdbDailyLimit = (int.TryParse(t5.Text.Trim(), out newLim) && newLim > 0) ? newLim : 1000;
                 Usage.OmdbLimit = cfg.OmdbDailyLimit;
                 cfg.UiLang = cu.SelectedIndex == 0 ? "es" : "en";
-                restart = (cfg.UiLang == "en") != L.En;   // el idioma de la interfaz solo se aplica al arrancar
+                restart = (cfg.UiLang == "en") != L.En;   // the interface language is only applied at startup
                 txtTemplate.Text = tp.Text;
                 txtTvTemplate.Text = tq.Text;
                 chkRecursive.Checked = c1.Checked;
@@ -4259,12 +4364,12 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 dlg.Close();
             };
             dlg.AcceptButton = ok;
-            dlg.Controls.AddRange(new Control[] { g1, g2, g3, ok });
+            dlg.Controls.AddRange(new Control[] { g1, g2, g3, wipe, ok });
             ShowThemed(dlg);
-            if (restart && !busy) Application.Restart();   // guarda y vuelve a abrir con el idioma nuevo
+            if (restart && !busy) Application.Restart();   // saves and reopens with the new language
         }
 
-        // ---- bienvenida (solo la primera vez, sin claves)
+        // ---- welcome window (first time only, when there are no keys)
         void WelcomeDialog()
         {
             Form dlg = new Form();
