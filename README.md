@@ -1,4 +1,4 @@
-![MoTV Renamer](screenshot.png)
+![MoTV Renamer](screenshot.jpg)
 
 # MoTV Renamer
 
