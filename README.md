@@ -11,7 +11,7 @@
 
 **English** · [Español](#español)
 
-![MoTV Renamer](screenshot.jpg)
+![MoTV Renamer](screenshot_en.jpg)
 
 [**Download MoTVRenamer.exe**](https://github.com/teleonline/MoTVRenamer/releases/latest)
 
