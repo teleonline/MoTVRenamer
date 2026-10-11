@@ -1,3 +1,5 @@
+![MoTV Renamer](screenshot.png)
+
 # MoTV Renamer
 
 **Español** · [English](#english)
