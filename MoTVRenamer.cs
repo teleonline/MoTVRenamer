@@ -1,7 +1,7 @@
-﻿// MoTV Renamer - Renombrador GRATUITO de peliculas y series para Windows (C# / WinForms). Solo uso personal, no comercial.
-// Autor: teleonline - https://github.com/teleonline/MoTVRenamer - Licencia: uso personal no comercial (ver LICENSE)
-// Fuentes: TMDb, IMDb (busqueda sin clave) y OMDb.
-// Compatible con el compilador que trae Windows (C# 5, .NET Framework 4.x). No necesita instalar nada.
+// MoTV Renamer - FREE movie and TV series renamer for Windows (C# / WinForms). Personal, non-commercial use only.
+// Author: teleonline - https://github.com/teleonline/MoTVRenamer - License: personal, non-commercial use (see LICENSE)
+// Sources: TMDb, IMDb (keyless search), OMDb and TheTVDB.
+// Compatible with the compiler that ships with Windows (C# 5, .NET Framework 4.x). Nothing to install.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
