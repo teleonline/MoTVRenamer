@@ -68,7 +68,6 @@ It works without keys using IMDb (movies only). For series and better accuracy, 
 
 - It only reads and renames files in the folders you choose, queries TMDb, OMDb, TheTVDB and IMDb, and stores its settings in `%APPDATA%\MoTVRenamer`. **It sends no data anywhere else.**
 - All the code is in one readable file: [`MoTVRenamer.cs`](MoTVRenamer.cs). You can review it or build your own `.exe` with `build.bat`.
-- Check your download: `certutil -hashfile MoTVRenamer.exe SHA256` must match the value in the release and on [VirusTotal](https://www.virustotal.com/gui/file/34c89adb287dab2d88d359e46b6a866718618ac1f0c6a7973a40ee88be8938aa).
 - Some antivirus products flag it because of their **machine-learning** (heuristic) models: being new and unsigned, it resembles other programs by its traits, but **no virus has been detected**. It is a false positive.
 
 ## Uninstall
@@ -154,7 +153,6 @@ Funciona sin claves con IMDb (solo películas). Para series y más precisión, c
 
 - Solo lee y renombra los archivos de las carpetas que eliges, consulta TMDb, OMDb, TheTVDB e IMDb, y guarda sus ajustes en `%APPDATA%\MoTVRenamer`. **No envía datos a ningún otro sitio.**
 - Todo el código está en un archivo legible: [`MoTVRenamer.cs`](MoTVRenamer.cs). Puedes revisarlo o crear tu propio `.exe` con `build.bat`.
-- Comprueba tu descarga: `certutil -hashfile MoTVRenamer.exe SHA256` debe dar el mismo valor que aparece en la release y en [VirusTotal](https://www.virustotal.com/gui/file/34c89adb287dab2d88d359e46b6a866718618ac1f0c6a7973a40ee88be8938aa).
 - Algunos antivirus lo marcan por sus modelos de **aprendizaje automático** (heurística): al ser un programa nuevo y sin firmar, se parece a otros por sus rasgos, pero **no se ha detectado ningún virus**. Es un falso positivo.
 
 ### Desinstalar
