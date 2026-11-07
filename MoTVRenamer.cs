@@ -42,7 +42,7 @@ namespace MoTVRenamer
     // and it is also stored inside the .exe file (right-click the file > Properties > Details).
     static class AppInfo
     {
-        public const string Version = "1.0.2";
+        public const string Version = "1.0.3";
     }
 
     // Starts the program and shows any unexpected error in a message box instead of closing silently.
@@ -251,6 +251,7 @@ namespace MoTVRenamer
             { "st_queued", new string[] { "En cola", "Queued" } },
             { "show_folder", new string[] { "Ver en carpeta", "Show in folder" } },
             { "btn_back", new string[] { "Anterior", "Back" } },
+            { "btn_restart", new string[] { "Empezar de nuevo", "Start over" } },
             { "btn_next", new string[] { "Siguiente", "Next" } },
             { "btn_search_again", new string[] { "Buscar de nuevo", "Search again" } },
             { "step1_desc", new string[] { "Elige la carpeta con tus películas y series, o añade archivos sueltos. También puedes arrastrarlos a la lista.", "Choose the folder with your movies and TV series, or add loose files. You can also drag them onto the list." } },
@@ -845,6 +846,18 @@ namespace MoTVRenamer
         static readonly Regex ImdbRe = new Regex(@"(?<![a-z0-9])tt\d{7,9}(?!\d)", RegexOptions.IgnoreCase);
         static readonly Regex InvalidRe = new Regex(@"[<>:""/\\|?*\x00-\x1f]");
 
+        // The ID with its decoration: [tt0133093], (tt0133093), "tt0133093", {imdb-tt0133093}, imdbid-tt0133093...
+        static readonly Regex ImdbStripRe = new Regex(@"(?<![a-z0-9])(?:imdb(?:[\s_-]?id)?[\s:=\-]*)?tt\d{7,9}(?!\d)", RegexOptions.IgnoreCase);
+
+        // Removes the IMDb ID and the empty brackets / quotes it leaves behind
+        static string StripImdb(string s)
+        {
+            if (!ImdbStripRe.IsMatch(s)) return s;
+            s = ImdbStripRe.Replace(s, " ");
+            s = Regex.Replace(s, @"[\(\[\{]\s*[\)\]\}]|""\s*""|“\s*”|'\s*'", " ");
+            return s;
+        }
+
         public static string FindImdbId(string text)
         {
             Match m = ImdbRe.Match(text ?? "");
@@ -868,9 +881,18 @@ namespace MoTVRenamer
         public static HashSet<string> SigTokens(string text)
         {
             HashSet<string> set = new HashSet<string>();
-            foreach (string t in Regex.Split(Fold(text ?? ""), "[^a-z0-9]+"))
+            string f = Fold(text ?? "");
+            foreach (Match m in Regex.Matches(f, "[a-z0-9]+"))
             {
-                if (t.Length == 0 || Stop.Contains(t)) continue;
+                string t = m.Value;
+                if (Stop.Contains(t))
+                {
+                    // "Wall-E", "X-Men": a lone letter joined by a hyphen/dot/apostrophe is part of the title, not an article
+                    bool glued = t.Length == 1 &&
+                        ((m.Index > 0 && "-·•.'’".IndexOf(f[m.Index - 1]) >= 0 && m.Index > 1 && char.IsLetterOrDigit(f[m.Index - 2])) ||
+                         (m.Index + 1 < f.Length && "-·•.'’".IndexOf(f[m.Index + 1]) >= 0));
+                    if (!glued) continue;
+                }
                 set.Add(t.Length > 3 && t.EndsWith("s") ? t.Substring(0, t.Length - 1) : t);
             }
             return set;
@@ -908,8 +930,8 @@ namespace MoTVRenamer
         public static void ParseName(string stem, out string title, out string year)
         {
             string s = Regex.Replace(stem, @"[._]+", " ");
+            s = StripImdb(s);                                 // [tt0133093] (tt0133093) "tt0133093" imdbid-tt0133093
             s = Regex.Replace(s, @"\{[^}]*\}", " ");        // {imdb-tt0133093} Plex-style tag
-            s = ImdbRe.Replace(s, " ");
             s = StripNoiseGroups(s);                          // (Catalan Spanish Japanese), [1080p], [YTS.MX]...
             // "(Director Name, 1986)" or "(1986, Director Name)": keep only the year, the names are not part of the title
             s = Regex.Replace(s, @"[\(\[][^\(\)\[\]]*?[,;/]\s*((?:19|20)\d{2})\s*[\)\]]", "($1)");
@@ -952,8 +974,8 @@ namespace MoTVRenamer
         static string CleanRelease(string s)
         {
             s = Regex.Replace(s, @"[._]+", " ");
+            s = StripImdb(s);
             s = Regex.Replace(s, @"\{[^}]*\}", " ");
-            s = ImdbRe.Replace(s, " ");
             s = StripNoiseGroups(s);
             Match junk = StrongRe.Match(s);
             return junk.Success ? s.Substring(0, junk.Index) : s;
@@ -995,7 +1017,7 @@ namespace MoTVRenamer
             string s = Regex.Replace(stem, @"[._]+", " ");
             Match m = EpRe.Match(s);
             if (!m.Success) m = EpXRe.Match(s);
-            if (!m.Success) return null;
+            if (!m.Success) return ParseWordEpisode(s, folder);
             string before = s.Substring(0, m.Index);
             string rest = s.Substring(m.Index + m.Length);
             string series, year, epName = "";
@@ -1048,6 +1070,58 @@ namespace MoTVRenamer
             h.Season = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
             h.Ep = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
             if (m.Groups[3].Success) h.Ep2 = int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture);
+            h.EpName = epName;
+            return h;
+        }
+
+        // "Episodio 1", "Capítulo 02", "Temporada 2 Episodio 5", "Episode 3"...: no S01E02, so the series comes from the folder
+        static readonly Regex EpWordRe = new Regex(
+            @"(?<![a-z0-9])(?:(?:temporada|season|temp|saison|staffel)[\s._-]*(\d{1,2})[\s._,-]*)?([eé]pis[oó]d(?:io|e)|cap[ií]tulo|cap|ep)\.?[\s._-]*(\d{1,3})(?![a-z0-9])",
+            RegexOptions.IgnoreCase);
+
+        // Season number from the folder name ("Temporada 2", "Season 02", "S3"); 0 if there is none
+        static int SeasonFromFolder(string folder)
+        {
+            string name = Path.GetFileName((folder ?? "").TrimEnd('\\', '/')).Trim();
+            if (name.Length == 0 || !SeasonDirRe.IsMatch(name)) return 0;
+            Match d = Regex.Match(name, @"(\d{1,3})$");
+            int v;
+            return d.Success && int.TryParse(d.Groups[1].Value, out v) ? v : 0;
+        }
+
+        static Hint ParseWordEpisode(string s, string folder)
+        {
+            Match m = EpWordRe.Match(s);
+            if (!m.Success) return null;
+            string before = s.Substring(0, m.Index);
+            string rest = s.Substring(m.Index + m.Length);
+            string word = Fold(m.Groups[2].Value);
+            bool strongWord = !word.StartsWith("episod");   // "Star Wars Episodio 1" is a movie, "Serie Cap 3" is not
+            string series = "", year = null, epName = "";
+            string fYear = null;
+            string fSeries = !string.IsNullOrEmpty(folder) ? SeriesFromFolder(folder, out fYear) : "";
+            if (HasWords(before))
+            {
+                if (!strongWord && !m.Groups[1].Success) return null;
+                ParseName(before, out series, out year);
+            }
+            else if (fSeries.Length > 0) { series = fSeries; year = fYear; }
+            else return null;
+            if (series.Length == 0) return null;
+            if (HasWords(rest))
+            {
+                string ignoredYear;
+                ParseName(CleanRelease(rest).Trim(' ', '-', '–', '—', '.', ',', ';', ':'), out epName, out ignoredYear);
+                if (StrongRe.IsMatch(epName)) epName = "";
+            }
+            int season = 1;
+            if (m.Groups[1].Success) season = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+            else { int fs = SeasonFromFolder(folder); if (fs > 0) season = fs; }
+            Hint h = new Hint();
+            h.Series = series;
+            h.Year = year;
+            h.Season = season;
+            h.Ep = int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture);
             h.EpName = epName;
             return h;
         }
@@ -1134,6 +1208,8 @@ namespace MoTVRenamer
 
         public static string Sanitize(string name)
         {
+            name = Regex.Replace(name, @"\s*:\s+", " - ");   // "F1: La película" -> "F1 - La película" (':' is not allowed in file names)
+            name = name.Replace(':', '-').Replace('"', '\'');  // "Re:Zero" -> "Re-Zero"
             name = InvalidRe.Replace(name, "");
             name = Regex.Replace(name, @"\s+", " ").Trim();
             name = name.TrimEnd('.', ' ');
@@ -1748,7 +1824,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             List<string> alts = new List<string>();
             string[] w = (title ?? "").Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             int n = w.Length;
-            if (n < 3) return alts;
+            if (n < 2) return alts;
             if (n >= 8)
             {
                 int h = n / 2;
@@ -1757,6 +1833,8 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             }
             for (int k = 1; k <= n - 2 && alts.Count < 6; k++)
                 alts.Add(string.Join(" ", w.Take(n - k).ToArray()));
+            // Unusual first word (F1, Wall-E, 2001, X-Men): try it alone, it is usually what identifies the title
+            if (Regex.IsMatch(w[0], @"[\d\-·]") && w[0].Length >= 2) alts.Add(w[0]);
             List<string> clean = new List<string>();
             foreach (string a in alts)
                 if (a.Length > 0 && !clean.Contains(a) && a != title && Names.SigTokens(a).Count >= 1) clean.Add(a);
@@ -3201,7 +3279,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             bottom2.Controls.Add(Btn(L.T("btn_skip"), delegate { ToggleSkip(); }));
             bottom2.Controls.Add(Btn(L.T("btn_imdb"), delegate { OpenImdb(); }));
 
-            btnBack = Btn(L.T("btn_back"), delegate { GoStep(step - 1); });
+            btnBack = Btn(L.T("btn_back"), delegate { if (step == 2 && AnyRenamed()) StartOver(); else GoStep(step - 1); });
             btnNext = Btn(L.T("btn_next"), delegate { GoStep(step + 1); }, 1);
             btnNext.Margin = new Padding(0);
             btnApply.Margin = new Padding(0);
@@ -3330,6 +3408,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             bool any = false;
             foreach (Item x in items) if (x.Searched) any = true;
             btnBack.Enabled = !busy;
+            btnBack.Text = (step == 2 && AnyRenamed()) ? L.T("btn_restart") : L.T("btn_back");
             btnNext.Enabled = !busy && (step == 0 ? items.Count > 0 : any);
             // Step 2: the footer button searches; once names are found it becomes "Search again" and "Next" is enabled
             if (!searchRunning)
@@ -3339,6 +3418,25 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 Ui.Restyle(btnSearch);
             }
             btnSearch.Enabled = !busy && items.Count > 0;
+        }
+
+        bool AnyRenamed()
+        {
+            foreach (Item x in items) if (x.Done) return true;
+            return false;
+        }
+
+        // After renaming: empty list and back to step 1
+        void StartOver()
+        {
+            if (busy) return;
+            manualFiles.Clear();
+            excluded.Clear();
+            items.Clear();
+            txtFolder.Text = "";
+            RefreshRows();
+            GoStep(0);
+            SetStatus("");
         }
 
         // With several single files each row has its own "Show in folder"; otherwise there is one button.
@@ -3763,6 +3861,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
                 if (File.Exists(m) && seen.Add(m)) items.Add(MakeItem(m, true));
             }
             RefreshRows();
+            UpdateNav();
             SetStatus(L.T("n_videos", "n", items.Count));
             return true;
         }
@@ -4214,6 +4313,7 @@ MoTV Renamer is a FREE program for renaming movies and TV series, for personal, 
             btnCancel.Enabled = false;
             manualFiles = items.Where(x => x.Manual).Select(x => x.FullPath).ToList();   // new paths after renaming
             RefreshRows();
+            UpdateNav();
             string msg;
             if (cancelled)
                 msg = L.T("fin_cancel", "d", done, "t", total, "l", Math.Max(0, total - done - errors.Count));
