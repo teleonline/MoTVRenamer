@@ -42,7 +42,7 @@ namespace MoTVRenamer
     // and it is also stored inside the .exe file (right-click the file > Properties > Details).
     static class AppInfo
     {
-        public const string Version = "1.0.3";
+        public const string Version = "1.0.5";
     }
 
     // Starts the program and shows any unexpected error in a message box instead of closing silently.
@@ -1017,7 +1017,7 @@ namespace MoTVRenamer
             string s = Regex.Replace(stem, @"[._]+", " ");
             Match m = EpRe.Match(s);
             if (!m.Success) m = EpXRe.Match(s);
-            if (!m.Success) return ParseWordEpisode(s, folder);
+            if (!m.Success) return ParseWordEpisode(s, folder) ?? ParseCompactEpisode(s, folder) ?? ParseNumberEpisode(s, folder);
             string before = s.Substring(0, m.Index);
             string rest = s.Substring(m.Index + m.Length);
             string series, year, epName = "";
@@ -1122,6 +1122,78 @@ namespace MoTVRenamer
             h.Year = year;
             h.Season = season;
             h.Ep = int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture);
+            h.EpName = epName;
+            return h;
+        }
+
+        // Compact codes: "B201", "S0201", "T201" (letter + season + 2-digit episode = 2x01) and a bare "201" (only if the name has no other words)
+        static readonly Regex CompactLetterRe = new Regex(@"(?<![a-z0-9])[a-gi-wyz](\d{1,2})(\d{2})(?![a-z0-9])", RegexOptions.IgnoreCase);
+        static readonly Regex CompactBareRe = new Regex(@"(?<![a-z0-9])(\d)(\d{2})(?![a-z0-9])");
+
+        static Hint ParseCompactEpisode(string s, string folder)
+        {
+            Match m = CompactLetterRe.Match(s);
+            bool bare = false;
+            if (!m.Success) { m = CompactBareRe.Match(s); bare = true; }
+            if (!m.Success) return null;
+            int season = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+            int ep = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
+            if (season < 1 || ep < 1) return null;
+            string before = s.Substring(0, m.Index);
+            string rest = s.Substring(m.Index + m.Length);
+            string series = "", year = null, epName = "";
+            string fYear = null;
+            string fSeries = !string.IsNullOrEmpty(folder) ? SeriesFromFolder(folder, out fYear) : "";
+            if (HasWords(before))
+            {
+                if (bare) return null;
+                ParseName(before, out series, out year);
+            }
+            else if (fSeries.Length > 0) { series = fSeries; year = fYear; }
+            else return null;
+            if (series.Length == 0) return null;
+            if (bare && HasWords(rest) && fSeries.Length == 0) return null;
+            if (HasWords(rest))
+            {
+                string ignoredYear;
+                ParseName(CleanRelease(rest).Trim(' ', '-', '–', '—', '.', ',', ';', ':'), out epName, out ignoredYear);
+                if (StrongRe.IsMatch(epName)) epName = "";
+            }
+            Hint h = new Hint();
+            h.Series = series;
+            h.Year = year;
+            h.Season = season;
+            h.Ep = ep;
+            h.EpName = epName;
+            return h;
+        }
+
+        // File named only with the episode number: "2.avi", "02.mkv" or "2 - Title.mkv" (series and season come from the folder)
+        static readonly Regex NumberOnlyRe = new Regex(@"^\s*(\d{1,2})\s*(?:[-–—]+\s*(.*))?$", RegexOptions.Singleline);
+
+        static Hint ParseNumberEpisode(string s, string folder)
+        {
+            Match m = NumberOnlyRe.Match(s);
+            if (!m.Success || string.IsNullOrEmpty(folder)) return null;
+            int ep = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+            if (ep < 1) return null;
+            string fYear;
+            string series = SeriesFromFolder(folder, out fYear);
+            if (series.Length == 0) return null;
+            string epName = "";
+            string rest = m.Groups[2].Success ? m.Groups[2].Value : "";
+            if (HasWords(rest))
+            {
+                string ignoredYear;
+                ParseName(CleanRelease(rest).Trim(' ', '-', '–', '—', '.', ',', ';', ':'), out epName, out ignoredYear);
+                if (StrongRe.IsMatch(epName)) epName = "";
+            }
+            int season = SeasonFromFolder(folder);
+            Hint h = new Hint();
+            h.Series = series;
+            h.Year = fYear;
+            h.Season = season > 0 ? season : 1;
+            h.Ep = ep;
             h.EpName = epName;
             return h;
         }
